@@ -41,22 +41,77 @@ def Dis_seismic_phase(path):
       f.closed
     
     try:
-        Seis_info=read_data.split('#Phase Arrivals:')  
-        Phase_info=Seis_info[1].split('#Station Magnitudes:')
-        Seis_info=Seis_info[0]
-        Mag_info=Phase_info[1]
-        Phase_info=Phase_info[0]
+        # Split by '#Phase Arrivals:'
+        parts = read_data.split('#Phase Arrivals:')
         
-        df_phase=pd.read_csv(StringIO(Phase_info), delim_whitespace=True,header=0,names=["id", "dist", "azi", "phase","date","time","res","wt"],index_col=0)
-        df_mag=pd.read_csv(StringIO(Mag_info), delim_whitespace=True,header=0,names=["id", "dist", "azi", "type","date","time","value","res","amp","per"]) 
+        if len(parts) < 2:
+            raise ValueError("No '#Phase Arrivals:' marker found")
         
-        Seis_info=Seis_info.split(sep=None)
-        O_time=datetime.datetime(int(Seis_info[0]),int(Seis_info[1]),int(Seis_info[2]),int(Seis_info[3]),int(Seis_info[4]),int(float(Seis_info[5])))
-        lat=Seis_info[6]
-        lon=Seis_info[8]
-        dep=Seis_info[10]
-        mag=Seis_info[12]
-        mag_flag=Seis_info[13]
+        Seis_info = parts[0].strip()
+        
+        # Split phase and magnitude info
+        phase_parts = parts[1].split('#Station Magnitudes:')
+        Phase_info = phase_parts[0].strip()
+        
+        if len(phase_parts) > 1:
+            Mag_info = phase_parts[1].strip()
+        else:
+            Mag_info = ""
+        
+        # Parse phase data
+        phase_lines = Phase_info.split('\n')
+        # Remove header line if present
+        data_lines = []
+        for line in phase_lines:
+            line = line.strip()
+            if line.startswith('#') or not line:
+                continue
+            data_lines.append(line)
+        
+        Phase_info_clean = '\n'.join(data_lines)
+        
+        # Determine column count
+        if len(data_lines) > 0:
+            first_data_line = data_lines[0]
+            num_cols = len(first_data_line.split())
+            
+            if num_cols == 7:
+                # Format: id, dist, azi, phase, time, res, wt
+                df_phase=pd.read_csv(StringIO(Phase_info_clean), sep=r'\s+',header=None,names=["id", "dist", "azi", "phase","time","res","wt"])
+            elif num_cols == 8:
+                # Format: id, dist, azi, phase, date, time, res, wt
+                df_phase=pd.read_csv(StringIO(Phase_info_clean), sep=r'\s+',header=None,names=["id", "dist", "azi", "phase","date","time","res","wt"])
+            else:
+                df_phase=pd.read_csv(StringIO(Phase_info_clean), sep=r'\s+',header=None)
+                if df_phase.shape[1] >= 4:
+                    df_phase.columns = ['id', 'dist', 'azi', 'phase'] + [f'col{i}' for i in range(4, df_phase.shape[1])]
+        else:
+            raise ValueError("No phase data found")
+        
+        # Parse event info from first line
+        # Format: year month day hour minute second lat lat_err lon lon_err dep dep_err mag
+        Seis_info_parts = Seis_info.split()
+        if len(Seis_info_parts) >= 13:
+            year = int(Seis_info_parts[0])
+            month = int(Seis_info_parts[1])
+            day = int(Seis_info_parts[2])
+            hour = int(Seis_info_parts[3])
+            minute = int(Seis_info_parts[4])
+            second = int(float(Seis_info_parts[5]))
+            
+            O_time=datetime.datetime(year, month, day, hour, minute, second)
+            lat=Seis_info_parts[6]
+            lon=Seis_info_parts[8]
+            dep=Seis_info_parts[10]
+            mag=Seis_info_parts[12]
+            mag_flag='' if len(Seis_info_parts) < 14 else Seis_info_parts[13]
+        else:
+            O_time=datetime.datetime.now()
+            lat=0.0
+            lon=0.0
+            dep=0.0
+            mag=0.0
+            mag_flag=''
         
         df_phase['O_time']=O_time
         df_phase['lat']=lat
@@ -64,7 +119,8 @@ def Dis_seismic_phase(path):
         df_phase['dep']=dep
         df_phase['mag']=mag
         df_phase['mag_flag']=mag_flag
-    except (IndexError, ValueError):
+        
+    except (IndexError, ValueError, pd.errors.ParserError):
         df_phase=pd.read_csv(path, sep='\t', encoding='utf-8', header=0)
         if 'Phase_name' in df_phase.columns:
             df_phase=df_phase.rename(columns={'Phase_name':'phase', 'Phase_time':'date', 'Phase_time_frac':'time', 'Distance':'dist', 'Azi':'azi'})
@@ -91,5 +147,3 @@ def Dis_seismic_phase(path):
             df_phase['mag_flag']=''
     
     return df_phase
-
-
